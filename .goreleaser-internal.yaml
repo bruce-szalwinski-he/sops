@@ -1,0 +1,163 @@
+# Internal Distribution GoReleaser Configuration for SOPS Fork
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+project_name: sops-hotelengine
+
+# xref: https://goreleaser.com/customization/hooks/
+before:
+  hooks:
+    - go mod download
+
+# xref: https://goreleaser.com/customization/env/
+env:
+  - CGO_ENABLED=0
+  - PKG=github.com/getsops/sops/v3/version
+  - APPLE_DEVELOPER_ID={{ .Env.APPLE_DEVELOPER_ID }}
+  - APPLE_DEVELOPER_PASSWORD={{ .Env.APPLE_DEVELOPER_PASSWORD }}
+  - APPLE_TEAM_ID={{ .Env.APPLE_TEAM_ID }}
+
+# xref: https://goreleaser.com/customization/reportsizes/
+report_sizes: true
+
+# xref: https://goreleaser.com/customization/build/
+builds:
+  - id: binary-darwin
+    main: ./cmd/sops
+    binary: "{{ .ProjectName }}"
+    flags:
+      - -trimpath
+      - -mod=readonly
+    ldflags:
+      - >
+        -s -w
+        -X {{ .Env.PKG }}.Version={{ .Version }}
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # Modified timestamp on the binary, set to ensure reproducible builds.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# xref: https://goreleaser.com/customization/universalbinaries/
+universal_binaries:
+  - id: binary-darwin-universal
+    ids:
+      - binary-darwin
+    name_template: '{{ .ProjectName }}'
+    replace: true
+    # Modified timestamp on the binary, set to ensure reproducible builds.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# xref: https://goreleaser.com/customization/signs/
+signs:
+  - cmd: codesign
+    env:
+      - APPLE_DEVELOPER_ID={{ .Env.APPLE_DEVELOPER_ID }}
+    args:
+      - "--sign"
+      - "Developer ID Application: {{ .Env.APPLE_DEVELOPER_ID }}"
+      - "--timestamp"
+      - "--options=runtime"
+      - "${artifact}"
+    signature: "${artifact}"
+    artifacts: binary
+    ids:
+      - binary-darwin-universal
+
+# xref: https://goreleaser.com/customization/notarize/
+notarize:
+  macos:
+    - enabled: '{{ eq .Env.ENABLE_NOTARIZATION "true" }}'
+      ids:
+        - binary-darwin-universal
+      password: "{{ .Env.APPLE_DEVELOPER_PASSWORD }}"
+      team_id: "{{ .Env.APPLE_TEAM_ID }}"
+
+# xref: https://goreleaser.com/customization/archive/#disable-archiving
+archives:
+  - id: archive-darwin-universal
+    format: zip
+    builds:
+      - binary-darwin-universal
+    name_template: '{{ .ProjectName }}-v{{ .Version }}-darwin-universal'
+    files:
+      - README.rst
+      - LICENSE
+
+# xref: https://goreleaser.com/customization/homebrew_casks/
+homebrew_casks:
+  - name: sops-hotelengine
+    ids:
+      - archive-darwin-universal
+    repository:
+      owner: hotelengine
+      name: homebrew-internal-tools
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: hotelengine-bot
+      email: engineering@hotelengine.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    description: "SOPS (HotelEngine Fork) - Simple and flexible tool for managing secrets"
+    homepage: "https://github.com/hotelengine/sops"
+    url_template: "https://github.com/hotelengine/sops/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    caveats: |
+      This is HotelEngine's internal fork of SOPS.
+      
+      To use this version of SOPS:
+        sops-hotelengine --version
+    app: sops-hotelengine
+    binary: "{{ .ProjectName }}"
+    uninstall:
+      - trash: "/Applications/{{ .ProjectName }}.app"
+
+# xref: https://goreleaser.com/customization/checksum/
+checksum:
+  name_template: "{{ .ProjectName }}-v{{ .Version }}.checksums.txt"
+  algorithm: sha256
+  ids:
+    - archive-darwin-universal
+
+# xref: https://goreleaser.com/customization/snapshots/
+snapshot:
+  name_template: "{{ incpatch .Version }}-dev-{{ .ShortCommit }}"
+
+# xref: https://goreleaser.com/customization/changelog/
+changelog:
+  use: github-native
+
+# xref: https://goreleaser.com/customization/release/
+release:
+  prerelease: auto
+  header: |
+    ## HotelEngine Internal SOPS Release
+
+    This is an internal release of SOPS with HotelEngine-specific modifications.
+
+    ### Installation via Homebrew
+
+    ```shell
+    # Add the HotelEngine tap (first time only)
+    brew tap hotelengine/internal-tools
+
+    # Install or upgrade sops-hotelengine
+    brew install --cask sops-hotelengine
+    ```
+
+    ### Manual Installation
+
+    ```shell
+    # Download the binary
+    curl -LO https://github.com/hotelengine/sops/releases/download/{{ .Tag }}/{{ .ProjectName }}-v{{ .Version }}-darwin-universal.zip
+
+    # Extract and install
+    unzip {{ .ProjectName }}-v{{ .Version }}-darwin-universal.zip
+    mv {{ .ProjectName }} /usr/local/bin/sops-hotelengine
+    chmod +x /usr/local/bin/sops-hotelengine
+    ```
+
+    ### Verify Installation
+
+    ```shell
+    sops-hotelengine --version
+    ```
